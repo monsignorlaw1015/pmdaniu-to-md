@@ -4,6 +4,10 @@
 
 适合团队把 PRD 原型文档喂给 AI 做 RAG 检索，或者整理成可协作的文档格式。
 
+<p align="center">
+  <img src="preview.png" alt="产品大牛文档转 Markdown 效果预览" width="600">
+</p>
+
 ## 快速开始
 
 把这个 URL 发给你的 Agent（OpenClaw、MyAgents、Claude Code、Codex、Hermes 等），说：
