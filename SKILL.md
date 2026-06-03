@@ -8,7 +8,7 @@
 - **web-access skill 已安装**（提供 CDP Proxy 能力）
   - 安装地址：https://github.com/eze-is/web-access
   - 安装完成后确保 CDP Proxy 运行在 3456 端口
-- **python3 可用**（macOS 通常自带；从 https://python.org 安装）
+- **Python 3 可用**（macOS/Linux 通常自带；Windows 从 https://python.org 安装）
 - **当前模型具备视觉能力**（能理解截图图片）
 - 输出目录：`outputs/产品大牛文档/`（自动创建）
 
@@ -37,28 +37,37 @@
 长链：https://www.pmdaniu.com/clouds/{uid}/{hash}/start.html?id={pageId}&p={encodedName}
 ```
 
-### CDP 操作关键点
+### CDP 操作关键点（Python urllib，跨平台）
 
-```bash
+```python
+import urllib.request, urllib.parse, json
+
+PROXY = "http://localhost:3456"
+
 # 1. 打开链接
-curl -s "http://localhost:3456/new?url=<URL>"
+res = json.loads(urllib.request.urlopen(f"{PROXY}/new?url={urllib.parse.quote(url, safe=':/?=&%')}").read())
+target_id = res["targetId"]
 
-# 2. 点过 jump 页（等 3 秒再点）
-curl -s -X POST "http://localhost:3456/click?target=<ID>" -d '.J_jump'
+# 2. 点击 jump 页（等 3 秒再点）
+req = urllib.request.Request(f"{PROXY}/click?target={target_id}", data=b".J_jump", method="POST")
+urllib.request.urlopen(req)
 
 # 3. 获取 sitemap
-curl -s -X POST "http://localhost:3456/eval?target=<ID>" -d 'JSON.stringify($axure.document.sitemap)'
+req = urllib.request.Request(f"{PROXY}/eval?target={target_id}",
+      data=b"JSON.stringify($axure.document.sitemap)", method="POST")
+result = json.loads(urllib.request.urlopen(req).read()).get("value", "")
 
 # 4. hash 导航到指定页（无 jump 页触发）
-curl -s -X POST "http://localhost:3456/eval?target=<ID>" \
-  -d 'window.location.hash = "#id=<pageId>&p=<encodedName>"; "ok"'
-# 等待 2 秒加载
+js = f'window.location.hash = "#id={page_id}&p={encoded_name}"; "ok"'
+req = urllib.request.Request(f"{PROXY}/eval?target={target_id}", data=js.encode(), method="POST")
+urllib.request.urlopen(req)  # 等待 2 秒加载
 
-# 5. 截图
-curl -s "http://localhost:3456/screenshot?target=<ID>&file=/tmp/pmdaniu_<docname>/page_<n>.png"
+# 5. 截图（file 用系统临时目录绝对路径）
+params = urllib.parse.urlencode({"target": target_id, "file": file_path})
+urllib.request.urlopen(f"{PROXY}/screenshot?{params}")
 
 # 6. 关闭 tab
-curl -s "http://localhost:3456/close?target=<ID>"
+urllib.request.urlopen(f"{PROXY}/close?target={target_id}")
 ```
 
 ---
@@ -67,80 +76,95 @@ curl -s "http://localhost:3456/close?target=<ID>"
 
 ### Step 0：环境自检
 
-```bash
-echo "=== 环境自检 ==="
+```python
+import sys, urllib.request, json
 
-# 检测 python3
-if command -v python3 &>/dev/null; then
-    echo "✓ python3 $(python3 --version)"
-else
-    echo ""
-    echo "✗ 未检测到 python3"
-    echo "  macOS:  brew install python3"
-    echo "  其他:   https://python.org"
-    exit 1
-fi
+print("=== 环境自检 ===")
+print(f"✓ Python {sys.version.split()[0]}")
 
-# 检测 CDP Proxy（同时触发懒连接）
-TARGETS=$(curl -s --max-time 5 "http://localhost:3456/targets" 2>/dev/null)
-COUNT=$(echo "$TARGETS" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null)
+try:
+    with urllib.request.urlopen("http://localhost:3456/targets", timeout=5) as resp:
+        targets = json.loads(resp.read())
+        COUNT = len(targets)
+        print(f"✓ CDP Proxy 已运行（当前 {COUNT} 个 tab）")
+except Exception as e:
+    print("""
+✗ CDP Proxy 未响应（localhost:3456）
 
-if [ -n "$COUNT" ]; then
-    echo "✓ CDP Proxy 已运行（当前 $COUNT 个 tab）"
-else
-    echo ""
-    echo "✗ CDP Proxy 未响应（localhost:3456）"
-    echo ""
-    echo "  需要安装并启动 web-access skill："
-    echo "  → https://github.com/eze-is/web-access"
-    echo ""
-    echo "  安装完成并启动 CDP Proxy 后，重新运行此 skill。"
-    exit 1
-fi
+  需要安装并启动 web-access skill：
+  → https://github.com/eze-is/web-access
 
-echo "=== 环境自检通过 ==="
+  安装完成并启动 CDP Proxy 后，重新运行此 skill。
+""")
+    sys.exit(1)
+
+print("=== 环境自检通过 ===")
 ```
 
 ### Step 1：验证 Chrome 连接
 
-```bash
-# CDP Proxy 已在 Step 0 触发连接，这里只做确认
-if [ -n "$COUNT" ] && [ "$COUNT" -ge 0 ]; then
-    echo "✓ Chrome 已连接，当前有 $COUNT 个 tab"
-else
-    echo "✗ 无法连接 Chrome，请检查："
-    echo "  1. 确认 Chrome 已打开"
-    echo "  2. 地址栏输入：chrome://inspect/#remote-debugging"
-    echo "  3. 勾选「Allow remote debugging for this browser instance」"
-    echo "  4. 若刚勾选，重启 Chrome 后重试"
-    exit 1
-fi
+```python
+if COUNT >= 0:
+    print(f"✓ Chrome 已连接，当前有 {COUNT} 个 tab")
+else:
+    print("""✗ 无法连接 Chrome，请检查：
+  1. 确认 Chrome 已打开
+  2. 地址栏输入：chrome://inspect/#remote-debugging
+  3. 勾选「Allow remote debugging for this browser instance」
+  4. 若刚勾选，重启 Chrome 后重试""")
+    sys.exit(1)
+```
+
+### CDP 工具函数（后续各步通用，在 Step 2 前定义）
+
+```python
+import urllib.request, urllib.parse, json, time, os, tempfile, re
+
+PROXY = "http://localhost:3456"
+
+def cdp_get(path):
+    with urllib.request.urlopen(f"{PROXY}{path}", timeout=30) as r:
+        return json.loads(r.read())
+
+def cdp_post(path, data):
+    body = data.encode("utf-8") if isinstance(data, str) else data
+    req = urllib.request.Request(f"{PROXY}{path}", data=body, method="POST")
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.loads(r.read())
+
+def eval_js(target, js):
+    res = cdp_post(f"/eval?target={target}", js)
+    return res.get("value", "")
+
+def screenshot(target, file_path):
+    # 统一转正斜杠，兼容 Windows 路径
+    fp = str(file_path).replace("\\", "/")
+    params = urllib.parse.urlencode({"target": target, "file": fp})
+    cdp_get(f"/screenshot?{params}")
+
+def new_tab(url):
+    return cdp_get(f"/new?url={urllib.parse.quote(url, safe=':/?=&%')}")
+
+def close_tab(target):
+    cdp_get(f"/close?target={target}")
 ```
 
 ### Step 2：打开文档，处理 jump 页
 
-```bash
-TARGET=$(curl -s "http://localhost:3456/new?url=<用户给的链接>" | python3 -c "import sys,json;print(json.load(sys.stdin)['targetId'])")
-sleep 3
-curl -s -X POST "http://localhost:3456/click?target=$TARGET" -d '.J_jump'
-sleep 4
+```python
+TARGET = new_tab("<用户给的链接>")["targetId"]
+time.sleep(3)
+cdp_post(f"/click?target={TARGET}", ".J_jump")
+time.sleep(4)
 # 确认已进入 Axure viewer（title 变为文档名）
-curl -s "http://localhost:3456/info?target=$TARGET"
+info = cdp_get(f"/info?target={TARGET}")
+print(info)
 ```
 
 ### Step 3：读取 sitemap，扁平化页面列表
 
 ```python
-import subprocess, json, urllib.parse, os, re
-
-def eval_js(target, js):
-    r = subprocess.run(
-        f'curl -s -X POST "http://localhost:3456/eval?target={target}" -d \'{js}\'',
-        shell=True, capture_output=True, text=True
-    )
-    return json.loads(r.stdout).get("value", "")
-
-sitemap_raw = eval_js(target, "JSON.stringify($axure.document.sitemap)")
+sitemap_raw = eval_js(TARGET, "JSON.stringify($axure.document.sitemap)")
 sitemap = json.loads(sitemap_raw)
 
 def flatten(nodes, path=[]):
@@ -155,24 +179,22 @@ def flatten(nodes, path=[]):
 
 pages = flatten(sitemap["rootNodes"])
 
-# 截图目录只用 ASCII 路径（含中文路径会导致截图无法保存）
+# 截图目录：系统临时目录（跨平台）+ ASCII 文件名（含中文路径截图无法保存）
 doc_name = re.sub(r'[^\x00-\x7F]', '_', pages[0]["name"] if pages else "doc")
-shot_dir = f"/tmp/pmdaniu_{doc_name}"
+shot_dir = os.path.join(tempfile.gettempdir(), f"pmdaniu_{doc_name}")
 os.makedirs(shot_dir, exist_ok=True)
-with open(f"{shot_dir}/pages.json", "w") as f:
+with open(os.path.join(shot_dir, "pages.json"), "w", encoding="utf-8") as f:
     json.dump(pages, f, ensure_ascii=False, indent=2)
 ```
 
 ### Step 4：逐页截图（含滚动截图 + 外嵌文档检测）
 
 ```python
-import time, urllib.parse, re as _re
-
-def _screenshot_with_scroll(target_id, path_prefix, eval_js_fn):
+def _screenshot_with_scroll(target_id, path_prefix):
     """对单个 tab 做滚动截图。超出一屏时分段拍，20% 重叠避免截断。
     自动处理飞书文档虚拟滚动容器（.bear-web-x-container）。
     """
-    feishu_dims = eval_js_fn(target_id,
+    feishu_dims = eval_js(target_id,
         'JSON.stringify((()=>{'
         'const el=document.querySelector(".bear-web-x-container");'
         'return el?{sh:el.scrollHeight,vh:el.clientHeight,is_feishu:true}:'
@@ -185,27 +207,20 @@ def _screenshot_with_scroll(target_id, path_prefix, eval_js_fn):
 
     def _scroll_to(pos):
         if is_feishu:
-            eval_js_fn(target_id,
-                f'document.querySelector(".bear-web-x-container").scrollTop={pos}'
-            )
+            eval_js(target_id,
+                f'document.querySelector(".bear-web-x-container").scrollTop={pos}')
         else:
-            eval_js_fn(target_id, f'window.scrollTo(0, {pos})')
+            eval_js(target_id, f'window.scrollTo(0, {pos})')
 
     if scroll_h <= view_h * 1.15:
-        subprocess.run(
-            f'curl -s "http://localhost:3456/screenshot?target={target_id}&file={path_prefix}.png"',
-            shell=True
-        )
+        screenshot(target_id, f"{path_prefix}.png")
     else:
         step = int(view_h * 0.8)
         pos, seg = 0, 0
         while pos < scroll_h:
             _scroll_to(pos)
             time.sleep(0.4)
-            subprocess.run(
-                f'curl -s "http://localhost:3456/screenshot?target={target_id}&file={path_prefix}_s{seg:02d}.png"',
-                shell=True
-            )
+            screenshot(target_id, f"{path_prefix}_s{seg:02d}.png")
             pos += step
             seg += 1
         _scroll_to(0)  # 复位
@@ -213,54 +228,43 @@ def _screenshot_with_scroll(target_id, path_prefix, eval_js_fn):
 
 for i, page in enumerate(pages):
     encoded = urllib.parse.quote(page["name"])
-    subprocess.run(
-        f'curl -s -X POST "http://localhost:3456/eval?target={target}" '
-        f'-d \'window.location.hash = "#id={page["id"]}&p={encoded}"; "ok"\'',
-        shell=True
-    )
+    eval_js(TARGET, f'window.location.hash = "#id={page["id"]}&p={encoded}"; "ok"')
     time.sleep(2)
 
     # ── 检测是否有外嵌文档（飞书、腾讯文档等） ──────────────────────────
     # querySelectorAll("iframe[src]") 检测不到（Axure mainFrame src="about:blank"）
     # 正确方式：fetch data.js 文件从中正则匹配外链 URL
     encoded_name = urllib.parse.quote(page["name"])
-    data_js_raw = eval_js(target,
+    data_js_raw = eval_js(TARGET,
         f'fetch("files/{encoded_name}/data.js").then(r=>r.text()).then(t=>t).catch(()=>"")'
     )
     iframes = []
     if data_js_raw:
-        urls = _re.findall(r'https?://[^\s\'"<>]+', data_js_raw)
+        urls = re.findall(r'https?://[^\s\'"<>]+', data_js_raw)
         iframes = [u for u in urls if any(d in u for d in
                    ["feishu.cn", "larksuite.com", "docs.qq.com", "shimo.im"])]
 
     if iframes:
         for iframe_url in iframes:
             print(f"  → 检测到嵌入外链：{iframe_url}")
-            embed_raw = subprocess.run(
-                f'curl -s "http://localhost:3456/new?url={urllib.parse.quote(iframe_url, safe=":/")}"',
-                shell=True, capture_output=True, text=True
-            ).stdout
-            embed_target = json.loads(embed_raw).get("targetId")
+            embed_target = new_tab(iframe_url).get("targetId")
             if not embed_target:
                 continue
             time.sleep(3)
 
-            _screenshot_with_scroll(embed_target, f"{shot_dir}/page_{i:02d}_embed", eval_js)
+            _screenshot_with_scroll(embed_target, os.path.join(shot_dir, f"page_{i:02d}_embed"))
 
             # 额外保存 innerText 供 Vision 核对 URL 和数字
             raw_text = eval_js(embed_target, 'document.body.innerText')
-            with open(f"{shot_dir}/page_{i:02d}_embed_text.txt", "w", encoding="utf-8") as f:
+            with open(os.path.join(shot_dir, f"page_{i:02d}_embed_text.txt"), "w", encoding="utf-8") as f:
                 f.write(raw_text)
 
-            subprocess.run(f'curl -s "http://localhost:3456/close?target={embed_target}"', shell=True)
+            close_tab(embed_target)
 
         # 外嵌页面本身也截一张（显示 Axure 主框架）
-        subprocess.run(
-            f'curl -s "http://localhost:3456/screenshot?target={target}&file={shot_dir}/page_{i:02d}_frame.png"',
-            shell=True
-        )
+        screenshot(TARGET, os.path.join(shot_dir, f"page_{i:02d}_frame.png"))
     else:
-        _screenshot_with_scroll(target, f"{shot_dir}/page_{i:02d}", eval_js)
+        _screenshot_with_scroll(TARGET, os.path.join(shot_dir, f"page_{i:02d}"))
 
     print(f"  ✓ page_{i:02d} {page['name']}")
 ```
@@ -269,7 +273,12 @@ for i, page in enumerate(pages):
 
 **将截图 PNG 逐一传给当前视觉模型理解。** 使用主模型自身的视觉能力，不要额外调用第三方 Vision 接口（会引入幻觉风险）。各运行时传图片的具体方式不同，按当前环境执行即可。
 
-先用 `ls {shot_dir}/` 列出所有文件，按文件名顺序处理：
+先用 Python 列出所有截图文件，按文件名排序处理：
+
+```python
+import os
+files = sorted(f for f in os.listdir(shot_dir) if f.endswith(".png"))
+```
 
 **文件命名规则：**
 
@@ -311,8 +320,9 @@ for i, page in enumerate(pages):
 ```python
 import os
 doc_title = pages[0]["name"] if pages else "未命名文档"
-os.makedirs("outputs/产品大牛文档", exist_ok=True)
-outpath = f"outputs/产品大牛文档/{doc_title}.md"
+out_dir = os.path.join("outputs", "产品大牛文档")
+os.makedirs(out_dir, exist_ok=True)
+outpath = os.path.join(out_dir, f"{doc_title}.md")
 
 # 层级规则：
 # 文档根页   → H1（文件标题）
@@ -323,10 +333,10 @@ outpath = f"outputs/产品大牛文档/{doc_title}.md"
 
 ### Step 7：清理
 
-```bash
-curl -s "http://localhost:3456/close?target=$TARGET"
+```python
+close_tab(TARGET)
 # 截图目录可保留供复查，确认无误后手动删：
-# rm -rf /tmp/pmdaniu_{doc_name}/
+# import shutil; shutil.rmtree(shot_dir)
 ```
 
 ---
@@ -357,4 +367,4 @@ curl -s "http://localhost:3456/close?target=$TARGET"
 - **Axure 嵌入文档检测**：`querySelectorAll("iframe[src]")` 检测不到（mainFrame src="about:blank"），正确方式是 fetch `files/{pageName}/data.js` 正则匹配 URL
 - **截图目录路径必须用 ASCII**：含中文的路径会导致截图无法保存，Step 3 已自动转换
 - jump 页每次通过 URL 参数导航都会触发，hash 导航不触发
-- subprocess 中的 curl 命令必须用 `shell=True`
+- Windows 上临时目录由 `tempfile.gettempdir()` 自动获取，不硬编码 `/tmp/`
