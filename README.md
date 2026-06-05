@@ -5,7 +5,7 @@
 适合团队把 PRD 原型文档喂给 AI 做 RAG 检索，或者整理成可协作的文档格式。
 
 <p align="center">
-  <img src="preview.png" alt="产品大牛文档转 Markdown 效果预览" width="600">
+  <img src="preview-v2.png" alt="产品大牛文档转 Markdown 效果预览" width="600">
 </p>
 
 ## 快速开始
